@@ -9,6 +9,7 @@ We also provide a similarly fine-tuned version of ESMFold called ESMFlow. Techni
 ![imgs/ensembles.gif](imgs/ensembles.gif)
 
 ## Installation
+Note: For installation on NERSC, we need load gcc/10.3.0 and cudatoolkit/11.5.
 In an environment with Python 3.9 (for example, `conda create -n [NAME] python=3.9`), run:
 ```
 pip install numpy==1.21.2 pandas==1.5.3

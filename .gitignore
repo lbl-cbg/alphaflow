@@ -1,0 +1,7 @@
+# Exclude __pycache__ directories
+__pycache__/
+**/__pycache__/
+
+# Exclude Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/

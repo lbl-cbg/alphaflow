@@ -32,7 +32,7 @@ class AlphaFoldCSVDataset:
 
         item = self.pdb_chains.iloc[idx]
         
-        mmcif_feats = self.data_pipeline.process_str(item.seqres, item.name)
+        mmcif_feats = self.data_pipeline.process_str(item.seqres, item.name) # Not necessarily mmcif
         if self.templates:
             path = f"{self.data_dir}/{item.name}.npz"
             mmcif_feats = dict(np.load(path, allow_pickle=True))

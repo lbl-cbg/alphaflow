@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import torch.nn as nn
 
 #https://github.com/scipy/scipy/blob/main/scipy/spatial/transform/_rotation.pyx
 def rmsdalign(a, b, weights=None): # alignes B to A  # [*, N, 3]
@@ -37,6 +38,58 @@ def kabsch_rmsd(a, b, weights=None):
     out = (out * weights).sum(-1) / weights.sum(-1)
     return torch.sqrt(out)
 
+class HarmonicPrior(nn.Module):
+    def __init__(self, hidden_features, output_dim=256):
+        super().__init__()
+        self.channels=hidden_features
+        self.q = nn.Linear(1, hidden_features)
+        self.k = nn.Linear(1, hidden_features)
+        self.v = nn.Linear(1, hidden_features)
+        self.out_layer = nn.Linear(hidden_features, output_dim)
+        self.orthognal_vector = nn.utils.parametrizations.orthogonal(nn.Linear(output_dim,output_dim))
+        self.background = Fixed_Prior().fixed_background()
+    def forward(self, x):
+        h_ = x[:, :, np.newaxis]
+        q = self.q(h_)
+        k = self.k(h_)
+        v = self.v(h_)
+        w_ = torch.bmm(q,k.permute(0,2,1))
+        w_ = w_ * (self.channels**(-0.5))
+        w_ = torch.nn.functional.softmax(w_,dim=2)
+        h_ = torch.bmm(w_,v)
+        h_ = self.out_layer(h_)
+        h_ = torch.matmul(x.unsqueeze(1),h_)
+        h_ = h_.squeeze(1)
+        h_ = nn.ReLU()(h_)
+        h_inv = 1/h_
+        h_inv[0] = 0 
+        Q = self.orthognal_vector.weight
+        return torch.matmul(Q,torch.sqrt(h_inv).T).T + self.background
+
+class Fixed_Prior:
+    def __init__(self, N = 256, a =3/(3.8**2)):
+        J = torch.zeros(N, N)
+        for i, j in zip(np.arange(N-1), np.arange(1, N)):
+            J[i,i] += a
+            J[j,j] += a
+            J[i,j] = J[j,i] = -a
+        D, P = torch.linalg.eigh(J)
+        D_inv = 1/D
+        D_inv[0] = 0
+        self.P, self.D_inv = P, D_inv
+        self.N = N
+
+    def to(self, device):
+        self.P = self.P.to(device)
+        self.D_inv = self.D_inv.to(device)
+        
+    def fixed_background(self):
+        return torch.matmul(self.P,torch.sqrt(self.D_inv))
+
+    def sample(self, batch_dims=()):
+        return self.P @ (torch.sqrt(self.D_inv)[:,None] * torch.randn(*batch_dims, self.N, 3, device=self.P.device))
+
+'''
 class HarmonicPrior:
     def __init__(self, N = 256, a =3/(3.8**2)):
         J = torch.zeros(N, N)
@@ -56,7 +109,7 @@ class HarmonicPrior:
         
     def sample(self, batch_dims=()):
         return self.P @ (torch.sqrt(self.D_inv)[:,None] * torch.randn(*batch_dims, self.N, 3, device=self.P.device))
-    
+'''
     
 '''
 def transition_matrix(N_bins=1000, X_max=5):

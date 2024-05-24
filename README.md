@@ -1,12 +1,14 @@
 # AlphaFlow
 
-AlphaFlow is a modified version of AlphaFold, fine-tuned with a flow matching objective, capable of generative modeling of protein conformational ensembles. In particular, AlphaFlow models:
+AlphaFlow is a modified version of AlphaFold, fine-tuned with a flow matching objective, designed for generative modeling of protein conformational ensembles. In particular, AlphaFlow aims to model:
 * Experimental ensembles, i.e, potential conformational states as they would be deposited in the PDB
 * Molecular dynamics ensembles at physiological temperatures
 
 We also provide a similarly fine-tuned version of ESMFold called ESMFlow. Technical details and thorough benchmarking results can be found in our paper, [AlphaFold Meets Flow Matching for Generating Protein Ensembles](https://arxiv.org/abs/2402.04845), by Bowen Jing, Bonnie Berger, Tommi Jaakkola. This repository contains all code, instructions and model weights necessary to run the method. If you have any questions, feel free to open an issue or reach out at bjing@mit.edu.
 
-![imgs/ensembles.gif](imgs/ensembles.gif)
+<p align="center">
+    <img src="imgs/6uof_A_animation.gif" width="600"/>
+</p>
 
 ## Installation
 Note: For installation on NERSC, we need load gcc/10.3.0 and cudatoolkit/11.5.
@@ -15,7 +17,7 @@ In an environment with Python 3.9 (for example, `conda create -n [NAME] python=3
 pip install numpy==1.21.2 pandas==1.5.3
 pip install torch==1.12.1+cu113 -f https://download.pytorch.org/whl/torch_stable.html
 pip install biopython==1.79 dm-tree==0.1.6 modelcif==0.7 ml-collections==0.1.0 scipy==1.7.1 absl-py einops
-pip install pytorch_lightning==2.0.4 fair-esm mdtraj 
+pip install pytorch_lightning==2.0.4 fair-esm mdtraj wandb
 pip install 'openfold @ git+https://github.com/aqlaboratory/openfold.git@103d037'
 
 For NERSC
@@ -63,7 +65,7 @@ Training checkpoints (from which fine-tuning can be resumed) are available upon 
 2. If running an **AlphaFlow** model, prepare an **MSA directory** and place the alignments in `.a3m` format at the following paths: `{alignment_dir}/{name}/a3m/{name}.a3m`. If you don't have the MSAs, there are two ways to generate them:
     1. Query the ColabFold server with `python -m scripts.mmseqs_query --split [PATH] --outdir [DIR]`.
     2. Download UniRef30 and ColabDB according to https://github.com/sokrypton/ColabFold/blob/main/setup_databases.sh and run `python -m scripts.mmseqs_search_helper --split [PATH] --db_dir [DIR] --outdir [DIR]`.
-3. If running an **MD+Templates** model, the template PDB file needs to be converted to zipped numpy arrays. Prepare a templates directory and run `python -m scripts.prep_templates --pdb [PATH] --name [NAME] --outdir [DIR]` for each PDB file of interest. The PDB file should include only a single chain with no residue gaps. The specified name must match the name in the input CSV. 
+3. If running an **MD+Templates** model, place the template PDB files into a templates directory with filenames matching the names in the input CSV. The PDB files should include only a single chain with no residue gaps.
 
 ### Running the model
 
@@ -79,7 +81,7 @@ python predict.py --mode esmfold --input_csv [PATH] --weights [PATH] --samples [
 ```
 Additional command line arguments for either model:
 * Use the `--pdb_id` argument to select (one or more) rows in the CSV. If no argument is specified, inference is run on all rows.
-* If running the **MD  model with templates**, append `--templates --templates_dir [DIR]`.
+* If running the **MD  model with templates**, append `--templates_dir [DIR]`.
 * If running any **distilled** model, append the arguments `--noisy_first --no_diffusion`.
 * To truncate the inference process for increased precision and reduced diversity, append (for example) `--tmax 0.2 --steps 2`. The default inference settings correspond to `--tmax 1.0 --steps 10`. See Appendix B.1 in the paper for more details.
 
@@ -137,6 +139,29 @@ To instead train on ATLAS with templates, run with the additional arguments `--f
 
 **ESMFlow**: run the same commands with `--mode esmfold` and `--train_cutoff 2020-05-01`.
 
+## Ensembles
+
+We provide the ensembles sampled from the model which were used for the analyses and results reported in the paper.
+
+### AlphaFlow ensembles
+| Model|Version|Samples|
+|:---|:--|:--|
+| AlphaFlow-PDB | base | https://alphaflow.s3.amazonaws.com/samples/alphaflow_pdb_base_202402.zip |
+| AlphaFlow-PDB | distilled | https://alphaflow.s3.amazonaws.com/samples/alphaflow_pdb_distilled_202402.zip |
+| AlphaFlow-MD | base | https://alphaflow.s3.amazonaws.com/samples/alphaflow_md_base_202402.zip |
+| AlphaFlow-MD | distilled | https://alphaflow.s3.amazonaws.com/samples/alphaflow_md_distilled_202402.zip |
+| AlphaFlow-MD+Templates | base | https://alphaflow.s3.amazonaws.com/samples/alphaflow_md_templates_base_202402.zip |
+| AlphaFlow-MD+Templates | distilled | https://alphaflow.s3.amazonaws.com/samples/alphaflow_md_templates_distilled_202402.zip |
+
+### ESMFlow ensembles
+| Model|Version|Samples|
+|:---|:--|:--|
+| ESMFlow-PDB | base | https://alphaflow.s3.amazonaws.com/samples/esmflow_pdb_base_202402.zip |
+| ESMFlow-PDB | distilled | https://alphaflow.s3.amazonaws.com/samples/esmflow_pdb_distilled_202402.zip |
+| ESMFlow-MD | base | https://alphaflow.s3.amazonaws.com/samples/esmflow_md_base_202402.zip |
+| ESMFlow-MD | distilled | https://alphaflow.s3.amazonaws.com/samples/esmflow_md_distilled_202402.zip |
+| ESMFlow-MD+Templates | base | https://alphaflow.s3.amazonaws.com/samples/esmflow_md_templates_base_202402.zip |
+| ESMFlow-MD+Templates | distilled | https://alphaflow.s3.amazonaws.com/samples/esmflow_md_templates_distilled_202402.zip |
 
 ## License
 MIT. Other licenses may apply to third-party source code noted in file headers.

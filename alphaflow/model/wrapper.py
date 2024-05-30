@@ -54,7 +54,9 @@ class ModelWrapper(pl.LightningModule):
         device = batch['aatype'].device
         batch_dims = batch['seq_length'].shape
         
-        noisy = self.harmonic_prior.sample(batch_dims)
+        # Just change here is OK
+        # How to change the to device
+        noisy = self.saxs_model(batch['saxs'])
         try:
             noisy = rmsdalign(batch['pseudo_beta'], noisy, weights=batch['pseudo_beta_mask']).detach() # ?!?!
         except:
@@ -127,7 +129,6 @@ class ModelWrapper(pl.LightningModule):
         self.iter_step += 1
         device = batch["aatype"].device
         batch_size = batch['aatype'].shape[0]
-        self.harmonic_prior.to(device)
         
         self.stage = stage
 
@@ -139,7 +140,7 @@ class ModelWrapper(pl.LightningModule):
         if self.args.distillation:
             return self.disillation_training_step(batch)
             
-        
+        # like line 159 self._add_noise model change batch.
         if torch.rand(1, generator=self.generator).item() < self.args.noise_prob:
             self._add_noise(batch)
             self.log('time', [batch['t'].mean().item()])
@@ -505,7 +506,7 @@ class AlphaFoldWrapper(ModelWrapper):
             self.cached_weights = None
         
         self.args = args
-        self.harmonic_prior = HarmonicPrior(config.data.train.crop_size)
+        self.saxs_model = HarmonicPrior(config.data.train.crop_size)
         self.generator = torch.Generator().manual_seed(137)
         self._log = defaultdict(list)
         self.last_log_time = time.time()

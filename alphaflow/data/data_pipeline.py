@@ -18,6 +18,7 @@ from multiprocessing import cpu_count
 from typing import Mapping, Optional, Sequence, Any
 
 import numpy as np
+import pandas as pd
 
 from openfold.data import templates, parsers, mmcif_parsing
 from openfold.data.templates import get_custom_template_features
@@ -26,6 +27,34 @@ from openfold.np import residue_constants, protein
 
 
 FeatureDict = Mapping[str, np.ndarray]
+
+def process_saxs_feats(self, saxs_dir: str, pad_length=512) -> FeatureDict:
+    """
+    Process SAXS features from the given directory.
+
+    Args:
+        saxs_dir (str): The directory containing the SAXS data.
+        pad_length (int, optional): The desired length of the padded SAXS data. Defaults to 512.
+
+    Returns:
+        FeatureDict: A dictionary containing the processed SAXS features.
+
+    Raises:
+        ValueError: If no SAXS data is available for the given input.
+    """
+    if os.path.isfile(saxs_dir):
+        pr_df = pd.read_csv(saxs_dir)
+    else:
+        raise ValueError("No SAXS data available for given input")
+        
+    pr = pr_df['P(r)'].values
+    pr = pr if len(pr) <= pad_length else pr[:pad_length]
+    pr_padded = np.pad(pr, 
+                        (0, pad_length-len(pr)), 
+                        constant_values=(0, 0))
+    features={}
+    features['saxs'] = pr_padded.astype(np.float32)
+    return features
 
 def make_sequence_features(
     sequence: str, description: str, num_res: int

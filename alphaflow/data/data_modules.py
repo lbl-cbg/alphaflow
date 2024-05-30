@@ -31,11 +31,14 @@ import torch
 from openfold.data import mmcif_parsing
 from alphaflow.data import data_pipeline, feature_pipeline
 from alphaflow.utils.tensor_utils import tensor_tree_map, dict_multimap
+from openfold.np import protein
+
 
 
 class OpenFoldSingleDataset(torch.utils.data.Dataset):
     def __init__(self,
         data_dir: str,
+        saxs_dir: str,
         config: mlc.ConfigDict,
         pdb_chains: pd.DataFrame,
         # cutoff_date: str,
@@ -54,7 +57,7 @@ class OpenFoldSingleDataset(torch.utils.data.Dataset):
         alignment_dir: str = None, 
         subsample_pos = False,
         num_confs = None,
-        first_as_template = False,
+        first_as_template = False, 
     ):
         """
             Args:
@@ -99,7 +102,7 @@ class OpenFoldSingleDataset(torch.utils.data.Dataset):
         """
         super(OpenFoldSingleDataset, self).__init__()
         self.data_dir = data_dir
-
+        self.saxs_dir = saxs_dir
         self.alignment_dir = alignment_dir
         self.config = config
         self.treat_pdb_as_distillation = treat_pdb_as_distillation
@@ -109,6 +112,7 @@ class OpenFoldSingleDataset(torch.utils.data.Dataset):
         self._output_raw = _output_raw
         self._structure_index = _structure_index
 
+        # May be usless
         self.supported_exts = [".cif", ".core", ".pdb", ".npz"]
         self.subsample_pos = subsample_pos
         self.num_confs = num_confs
@@ -125,31 +129,41 @@ class OpenFoldSingleDataset(torch.utils.data.Dataset):
         if(not self._output_raw):
             self.feature_pipeline = feature_pipeline.FeaturePipeline(config) 
 
-    def _parse_mmcif(self, path, file_id, chain_id, alignment_dir, alignment_index):
+    # def _parse_mmcif(self, path, file_id, chain_id, alignment_dir, alignment_index):
         
-        with open(path, 'r') as f:
-            mmcif_string = f.read()
+    #     with open(path, 'r') as f:
+    #         mmcif_string = f.read()
             
 
-        start = time.time()
-        mmcif_object = mmcif_parsing.parse(
-            file_id=file_id, mmcif_string=mmcif_string
-        )
+    #     start = time.time()
+    #     mmcif_object = mmcif_parsing.parse(
+    #         file_id=file_id, mmcif_string=mmcif_string
+    #     )
         
-        # Crash if an error is encountered. Any parsing errors should have
-        # been dealt with at the alignment stage.
-        if(mmcif_object.mmcif_object is None):
-            raise list(mmcif_object.errors.values())[0]
+    #     # Crash if an error is encountered. Any parsing errors should have
+    #     # been dealt with at the alignment stage.
+    #     if(mmcif_object.mmcif_object is None):
+    #         raise list(mmcif_object.errors.values())[0]
 
-        mmcif_object = mmcif_object.mmcif_object
+    #     mmcif_object = mmcif_object.mmcif_object
         
-        start = time.time()
-        data = self.data_pipeline.process_mmcif(
-            mmcif=mmcif_object,
-            chain_id=chain_id,
-        )
+    #     start = time.time()
+    #     data = self.data_pipeline.process_mmcif(
+    #         mmcif=mmcif_object,
+    #         chain_id=chain_id,
+    #     )
 
-        return data
+    #     return data
+    def _parse_pdb(self, path):
+        
+        with open(path, 'r') as f:
+            pdb_string = f.read()
+
+        protein_ob = protein.from_pdb_string(pdb_string)
+        
+        protein_feature = data_pipeline.make_protein_features(protein_object=protein_ob,description='')
+        return protein_feature
+    
 
     def chain_id_to_idx(self, chain_id):
         return self._chain_id_to_idx_dict[chain_id]
@@ -157,38 +171,61 @@ class OpenFoldSingleDataset(torch.utils.data.Dataset):
     def idx_to_chain_id(self, idx):
         return self._chain_ids[idx]
     
+    # def __getitem__(self, idx):
+    #     if self.num_confs:
+    #         idx, conf_idx = idx // self.num_confs, idx % self.num_confs
+    #     item = self.pdb_chains.iloc[idx]
+    #     name = item.name
+    #     pdb_id, chain = name.split('_')
+        
+    #     try:
+    #         path = f"{self.data_dir}/{name}.npz"
+    #         mmcif_feats = dict(np.load(path, allow_pickle=True))
+    #     except:
+    #         path = f"{self.data_dir}/{name[1:3]}/{name}.npz"
+    #         mmcif_feats = dict(np.load(path, allow_pickle=True))
+
+    #     if self.first_as_template:
+    #         extra_all_atom_positions = mmcif_feats['all_atom_positions'][0]
+    #         mmcif_feats['extra_all_atom_positions'] = extra_all_atom_positions
+        
+    #     if self.subsample_pos:
+    #         N = mmcif_feats['all_atom_positions'].shape[0]
+    #         conf_idx = np.random.randint(0, N)
+    #         mmcif_feats['all_atom_positions'] = mmcif_feats['all_atom_positions'][conf_idx]
+    #     elif self.num_confs:
+    #         mmcif_feats['all_atom_positions'] = mmcif_feats['all_atom_positions'][conf_idx]
+        
+    #     msa_features = self.data_pipeline._process_msa_feats(f'{self.alignment_dir}/{item.msa_id}', item.seqres, alignment_index=None)
+    #     data = {**mmcif_feats, **msa_features} 
+    #     if(self._output_raw):
+    #         return data
+    #     feats = self.feature_pipeline.process_features(data, self.mode) 
+    #     feats['name'] = item.name
+    #     feats['seqres'] = item.seqres
+    #     return feats
+
     def __getitem__(self, idx):
-        if self.num_confs:
-            idx, conf_idx = idx // self.num_confs, idx % self.num_confs
+        
+        # Get the PDB info from the preprocessed dataframe
         item = self.pdb_chains.iloc[idx]
         name = item.name
         pdb_id, chain = name.split('_')
         
-        try:
-            path = f"{self.data_dir}/{name}.npz"
-            mmcif_feats = dict(np.load(path, allow_pickle=True))
-        except:
-            path = f"{self.data_dir}/{name[1:3]}/{name}.npz"
-            mmcif_feats = dict(np.load(path, allow_pickle=True))
-
-        if self.first_as_template:
-            extra_all_atom_positions = mmcif_feats['all_atom_positions'][0]
-            mmcif_feats['extra_all_atom_positions'] = extra_all_atom_positions
-        
-        if self.subsample_pos:
-            N = mmcif_feats['all_atom_positions'].shape[0]
-            conf_idx = np.random.randint(0, N)
-            mmcif_feats['all_atom_positions'] = mmcif_feats['all_atom_positions'][conf_idx]
-        elif self.num_confs:
-            mmcif_feats['all_atom_positions'] = mmcif_feats['all_atom_positions'][conf_idx]
-        
+        # Parse the PDB file and extract SAXS features and load MSA features.
+        pdb_features = self._parse_pdb(f"{self.data_dir}/{item.name}.pdb")
         msa_features = self.data_pipeline._process_msa_feats(f'{self.alignment_dir}/{item.msa_id}', item.seqres, alignment_index=None)
-        data = {**mmcif_feats, **msa_features}
+        saxs_features = data_pipeline.process_saxs_feats(f'{self.saxs_dir}/{item.saxs_loc}')
+        
+        # Combine the features as data and process them with the feature pipeline to generate the final features as numpy arrays.
+        data = {**pdb_features, **msa_features, **saxs_features}
         if(self._output_raw):
             return data
-        feats = self.feature_pipeline.process_features(data, self.mode) 
+       
+        feats = self.feature_pipeline.process_features(data, self.mode)
         feats['name'] = item.name
         feats['seqres'] = item.seqres
+        
         return feats
 
     def __len__(self):

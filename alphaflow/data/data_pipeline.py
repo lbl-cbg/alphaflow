@@ -836,3 +836,36 @@ class DataPipeline:
             **msa_features, 
             **template_features,
         }
+def empty_template_feats(n_res):
+    return {
+        "template_aatype": np.zeros(
+            (0, n_res, len(residue_constants.restypes_with_x_and_gap)),
+            np.float32
+        ),
+        "template_all_atom_mask": np.zeros(
+            (0, n_res, residue_constants.atom_type_num), np.float32
+        ),
+        "template_all_atom_positions": np.zeros(
+            (0, n_res, residue_constants.atom_type_num, 3), np.float32
+        ),
+        "template_domain_names": np.array([''.encode()], dtype=object),
+        "template_sequence": np.array([''.encode()], dtype=object),
+        "template_sum_probs": np.zeros((0, 1), dtype=np.float32),
+    }
+
+def make_template_features(
+    input_sequence: str,
+    hits: Sequence[Any],
+    template_featurizer: Any,
+) -> FeatureDict:
+    hits_cat = sum(hits.values(), [])
+    if(len(hits_cat) == 0 or template_featurizer is None):
+        template_features = empty_template_feats(len(input_sequence))
+    else:
+        templates_result = template_featurizer.get_templates(
+            query_sequence=input_sequence,
+            hits=hits_cat,
+        )
+        template_features = templates_result.features
+
+    return template_features

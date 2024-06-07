@@ -213,7 +213,7 @@ class OpenFoldSingleDataset(torch.utils.data.Dataset):
         pdb_id, chain = name.split('_')
         
         # Parse the PDB file and extract SAXS features and load MSA features.
-        pdb_features = self._parse_pdb(f"{self.data_dir}/{item.name}.pdb")
+        pdb_features = self._parse_pdb(f"{self.data_dir}/pdb/fixed_{item.name}.pdb")
         msa_features = self.data_pipeline._process_msa_feats(f'{self.alignment_dir}/{item.msa_id}', item.seqres, alignment_index=None)
         saxs_features = data_pipeline.process_saxs_feats(f'{self.saxs_dir}/{item.saxs_loc}')
         

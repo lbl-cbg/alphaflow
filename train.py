@@ -10,13 +10,13 @@ from functools import partial
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 from openfold.utils.exponential_moving_average import ExponentialMovingAverage
-from alphaflow.model.wrapper import ESMFoldWrapper, AlphaFoldWrapper
+from alphaflow.model.wrapper import  AlphaFoldWrapper
 from openfold.utils.import_weights import import_jax_weights_
 
 torch.set_float32_matmul_precision("high")
 from alphaflow.config import model_config
 from alphaflow.data.data_modules import OpenFoldSingleDataset, OpenFoldBatchCollator, OpenFoldDataset
-from alphaflow.data.inference import CSVDataset, AlphaFoldCSVDataset
+from alphaflow.data.inference import AlphaFoldCSVDataset
 
 config = model_config(
     'initial_training',
@@ -51,15 +51,10 @@ def main():
 
     logger.info("Loading the chains dataframe")
     pdb_chains = pd.read_csv(args.pdb_chains, index_col='name')
-
-    if args.filter_chains:
-        clusters = load_clusters(args.pdb_clusters)
-        pdb_chains = pdb_chains.join(clusters)
-        pdb_chains = pdb_chains[pdb_chains.release_date < args.train_cutoff]
-    
     trainset = OpenFoldSingleDataset(
         data_dir = args.train_data_dir,
         alignment_dir = args.train_msa_dir,
+        saxs_dir=args.saxs_dir,
         pdb_chains = pdb_chains,
         config = data_cfg,
         mode = 'train',
@@ -71,6 +66,7 @@ def main():
         valset = OpenFoldSingleDataset(
             data_dir = args.train_data_dir,
             alignment_dir = args.train_msa_dir,
+            saxs_dir=args.saxs_dir,
             pdb_chains = val_pdb_chains,
             config = data_cfg,
             mode = 'train',
@@ -86,8 +82,6 @@ def main():
             data_dir=args.train_data_dir,
             msa_dir=args.val_msa_dir,
         )
-    if args.filter_chains:
-        trainset = OpenFoldDataset([trainset], [1.0], args.train_epoch_len)
     
     val_loader = torch.utils.data.DataLoader(
         valset,
@@ -121,30 +115,20 @@ def main():
         check_val_every_n_epoch=args.val_freq,
         logger=False,
     )
-    if args.mode == 'esmfold':
-        model = ESMFoldWrapper(config, args)
-        if args.ckpt is None:
-            logger.info("Loading the model")
-            path = "esmfold_3B_v1.pt"
-            model_data = torch.load(path)
-            model_state = model_data["model"]
-            model.esmfold.load_state_dict(model_state, strict=False)
-            logger.info("Model has been loaded")
-            
-            if not args.no_ema:
-                model.ema = ExponentialMovingAverage(
-                    model=model.esmfold, decay=config.ema.decay
-                ) # need to initialize EMA this way at the beginning
-    elif args.mode == 'alphafold':
+
+    if args.mode == 'alphafold':
         model = AlphaFoldWrapper(config, args)
         if args.ckpt is None:
             logger.info("Loading the model")
-            import_jax_weights_(model.esmfold, 'params_model_1.npz', version='model_3')
+            #Originally this is model.esmfold
+            import_jax_weights_(model.model, 'params_model_1.npz', version='model_3')
             if not args.no_ema:
                 model.ema = ExponentialMovingAverage(
                     model=model.model, decay=config.ema.decay
                 ) # need to initialize EMA this way at the beginning
-    
+    else:
+        raise ValueError("This part is removed for now.")
+
     if args.restore_weights_only:
         model.load_state_dict(torch.load(args.ckpt, map_location='cpu')['state_dict'], strict=False)
         args.ckpt = None

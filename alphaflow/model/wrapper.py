@@ -57,6 +57,7 @@ class ModelWrapper(pl.LightningModule):
         # Just change here is OK
         # How to change the to device
         noisy = self.saxs_model(batch['saxs'])
+        noisy = noisy.to(device)
         try:
             noisy = rmsdalign(batch['pseudo_beta'], noisy, weights=batch['pseudo_beta_mask']).detach() # ?!?!
         except:
@@ -352,7 +353,7 @@ class ModelWrapper(pl.LightningModule):
         
         N = batch['aatype'].shape[1]
         device = batch['aatype'].device
-        prior = HarmonicPrior(N)
+        prior = HarmonicPrior(batch['saxs'])
         prior.to(device)
         noisy = prior.sample()
         
@@ -462,33 +463,6 @@ class ModelWrapper(pl.LightningModule):
         }
 
     
-
-
-class ESMFoldWrapper(ModelWrapper):
-    def __init__(self, cfg, args, training=True):
-        super().__init__()
-        self.save_hyperparameters()
-        self.cfg = cfg
-        self.args = args
-        self.model = ESMFold(cfg.model,
-                extra_input=args and 'extra_input' in args.__dict__ and args.extra_input)
-        if training:
-            if args and 'distillation' in args.__dict__ and args.distillation:
-                self.teacher = ESMFold(cfg.model, extra_input=args and 'extra_input' in args.__dict__ and args.extra_input)
-            self.loss = AlphaFoldLoss(cfg.loss, esmfold=True)
-            self.ema = ExponentialMovingAverage(
-                model=self.model, decay=cfg.ema.decay
-            )
-            self.cached_weights = None
-            
-        self._log = defaultdict(list)
-
-        self.harmonic_prior = HarmonicPrior(cfg.data.train.crop_size)
-        self.generator = torch.Generator().manual_seed(137)
-        self.last_log_time = time.time()
-        self.iter_step = 0
-
-
 class AlphaFoldWrapper(ModelWrapper):
     def __init__(self, config, args, training=True):
         super().__init__()
@@ -497,8 +471,7 @@ class AlphaFoldWrapper(ModelWrapper):
         self.model = AlphaFold(config,
                 extra_input=args and 'extra_input' in args.__dict__ and args.extra_input)
         if training:
-            if args and 'distillation' in args.__dict__ and args.distillation:
-                self.teacher = AlphaFold(config, extra_input=args and 'extra_input' in args.__dict__ and args.extra_input)
+
             self.loss = AlphaFoldLoss(config.loss)
             self.ema = ExponentialMovingAverage(
                 model=self.model, decay=config.ema.decay
@@ -506,7 +479,7 @@ class AlphaFoldWrapper(ModelWrapper):
             self.cached_weights = None
         
         self.args = args
-        self.saxs_model = HarmonicPrior(config.data.train.crop_size)
+        self.saxs_model = HarmonicPrior(hidden_features=64, output_dim = config.data.train.crop_size)
         self.generator = torch.Generator().manual_seed(137)
         self._log = defaultdict(list)
         self.last_log_time = time.time()

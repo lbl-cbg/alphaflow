@@ -33,6 +33,7 @@ def parse_train_args():
     parser.add_argument("--pdb_clusters", type=str, default='./pdb_clusters')
     parser.add_argument("--train_cutoff", type=str, default='2021-10-01')
     parser.add_argument("--mmcif_dir", type=str, default='./mmcif_dir')
+    parser.add_argument("--saxs_dir", type=str, default='./saxs_dir')
     parser.add_argument("--filter_chains", action='store_true')
     parser.add_argument("--sample_train_confs", action='store_true')
     

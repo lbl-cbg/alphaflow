@@ -47,7 +47,7 @@ class HarmonicPrior(nn.Module):
         self.v = nn.Linear(1, hidden_features)
         self.out_layer = nn.Linear(hidden_features, output_dim)
         self.orthognal_vector = nn.utils.parametrizations.orthogonal(nn.Linear(output_dim,output_dim))
-        self.background = Fixed_Prior().fixed_background()
+        self.background = Fixed_Prior()
     def forward(self, x):
         h_ = x[:, :, np.newaxis]
         q = self.q(h_)
@@ -64,7 +64,7 @@ class HarmonicPrior(nn.Module):
         h_inv = 1/h_
         h_inv[0] = 0 
         Q = self.orthognal_vector.weight
-        return torch.matmul(Q,torch.sqrt(h_inv).T).T + self.background
+        return torch.matmul(Q,torch.sqrt(h_inv).T).T + self.background.fixed_background
 
 class Fixed_Prior:
     def __init__(self, N = 256, a =3/(3.8**2)):

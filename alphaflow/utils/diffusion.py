@@ -2,6 +2,8 @@ import torch
 import numpy as np
 import torch.nn as nn
 
+import time
+
 #https://github.com/scipy/scipy/blob/main/scipy/spatial/transform/_rotation.pyx
 def rmsdalign(a, b, weights=None): # alignes B to A  # [*, N, 3]
     B = a.shape[:-2]
@@ -37,7 +39,7 @@ def kabsch_rmsd(a, b, weights=None):
     out = torch.square(b_aligned - a).sum(-1)
     out = (out * weights).sum(-1) / weights.sum(-1)
     return torch.sqrt(out)
-
+'''
 class HarmonicPrior(nn.Module):
     def __init__(self, hidden_features, output_dim=256):
         super().__init__()
@@ -64,30 +66,218 @@ class HarmonicPrior(nn.Module):
         h_inv = 1/h_
         h_inv[0] = 0 
         Q = self.orthognal_vector.weight
-        return torch.matmul(Q,torch.sqrt(h_inv).T).T + self.background.fixed_background
+        return torch.matmul(Q,torch.sqrt(h_inv).T).T
+        return torch.matmul(Q,torch.sqrt(h_inv).T).T + self.background.fixed_background()
+'''
 
-class Fixed_Prior:
-    def __init__(self, N = 256, a =3/(3.8**2)):
+class SAXS_to_Eigenvalue(nn.Module):
+    def __init__(self, input_shape, hidden_features, output_dim):
+        super().__init__()
+        self.channels=hidden_features
+        self.q = nn.Linear(input_shape, hidden_features)
+        self.k = nn.Linear(1, hidden_features)
+        self.v = nn.Linear(1, hidden_features)
+        self.out_layer = nn.Linear(hidden_features, output_dim)
+    def forward(self, x):
+        h_ = x[:, :, np.newaxis]
+        q = self.q(h_.permute(0,2,1))
+        print(q.device)
+        k = self.k(h_)
+        v = self.v(h_)
+        w_ = torch.bmm(q,k.permute(0,2,1))
+        w_ = w_ * (self.channels**(-0.5))
+        w_ = torch.nn.functional.softmax(w_,dim=2)
+        h_ = torch.bmm(w_,v)
+        h_ = self.out_layer(h_)
+        h_ = nn.ReLU()(h_)
+        h_ = h_.squeeze(dim=1)
+        return h_
+    
+class SAXS_to_Eigenvector_Cov(nn.Module):
+    def __init__(self, input_shape, hidden_features, output_dim):
+        super().__init__()
+        self.channels=hidden_features
+        self.q = nn.Conv1d(in_channels=1, out_channels=hidden_features, kernel_size=1,device='cuda')
+        self.k = nn.Conv1d(in_channels=1, out_channels=hidden_features, kernel_size=1,device='cuda')
+        self.v = nn.Conv1d(in_channels=1, out_channels=hidden_features, kernel_size=1,device='cuda')
+        self.out_layer = nn.Linear(hidden_features, output_dim)
+        self.out_layer_2 = nn.Linear(input_shape, output_dim)
+        
+    def gram_schmidt(self, vv):
+        def projection(u, v):
+            return (v * u).sum() / (u * u).sum() * u
+        batch_size = vv.size(0)
+        nk = vv.size(1)
+        uu = torch.zeros_like(vv, device=vv.device)
+        for i in range(batch_size):
+            ui = vv[i].clone()
+            uu[i, :, 0] = ui[:, 0].clone()
+            for k in range(1, nk):
+                vk = vv[i, k].clone()
+                uk = 0
+                for j in range(0, k):
+                    uj = uu[i, :, j].clone()
+                    uk = uk + projection(uj, vk)
+                uu[i, :, k] = vk - uk
+            for k in range(nk):
+                uk = uu[i, :, k].clone()
+                uu[i, :, k] = uk / uk.norm()
+        return uu
+
+    def forward(self, x):
+        h_ = x[:, np.newaxis, :]
+        #print(x.shape, h_.shape)
+        #h_ = self.upscale(h_)
+        time_single=time.time()
+        q = self.q(h_)
+        k = self.k(h_)
+        v = self.v(h_)
+        time_single_end=time.time()
+        print('time_single:', time_single_end-time_single)
+        #print(k.shape)
+        w_ = torch.bmm(q.permute(0,2,1),k)
+        w_ = w_ * (self.channels**(-0.5))
+        w_ = torch.nn.functional.softmax(w_,dim=2)
+        #print(w_.shape)
+        #print(v.shape)
+        h_ = torch.bmm(w_,v.permute(0,2,1)) 
+        print(h_.device) 
+        #print(h_.shape)
+        h_ = self.out_layer(h_)
+        #print(h_.shape)
+        h_ = self.out_layer_2(h_.permute(0,2,1))
+        #print(h_.shape)
+        time_grad = time.time()
+        h_ = self.gram_schmidt(h_)
+        time_grad_end = time.time()
+        print('time_grad:', time_grad_end-time_grad)
+        return h_
+    
+class HarmonicPrior(nn.Module):
+    def __init__(self, input_shape, hidden_features, output_dim):
+        super().__init__()
+        self.a =3/(3.8**2)
+        self.input_shape=input_shape
+        self.channels=hidden_features
+        self.output_dim=output_dim
+        self.eigenvalue=SAXS_to_Eigenvalue(input_shape,hidden_features, output_dim)
+        self.eigenvector=SAXS_to_Eigenvector_Cov(input_shape,hidden_features, output_dim)
+
+    def forward(self, x):
+        start_time=time.time()
+        lambda_value=self.eigenvalue(x)
+        self.lambda_value = torch.clamp(lambda_value, min=0.01)
+        step1_time=time.time()
+        nu_vector=self.eigenvector(x)
+        self.nu_vector=nu_vector
+        step2_time = time.time()
+        batch_dims=x.size(0)
+        lambda_value_inverse = torch.sqrt(1/self.lambda_value)
+        step3_time = time.time()
+        rand=torch.randn(batch_dims, self.output_dim, 3, device=x.device)
+        step4_time = time.time()
+        dot_product = torch.einsum('ij,ijk->ijk', lambda_value_inverse ,rand )
+        return_value=torch.bmm(nu_vector, dot_product)
+        step5_time = time.time()
+        print('step 1:', step1_time-start_time)
+        print('step 2:', step2_time-step1_time)
+        print('step 3:', step3_time-step2_time)
+        print('step 4:', step4_time-step3_time)
+        print('step 5:', step5_time-step4_time)
+        return return_value, torch.einsum('ij,ijk->ijk', self.lambda_value, self.nu_vector)
+    
+class PriorLoss(nn.Module):
+    def __init__(self, N=256, a =3/(3.8**2)):
+        super().__init__()
+        self.a = a
+        self.N = N
+        self.background = self.fixed_background()
+        self.mask_matrix = self.mask()
+        self.loss_fn=nn.MSELoss(reduction='sum')
+
+    def fixed_background(self):
+        N = self.N
         J = torch.zeros(N, N)
         for i, j in zip(np.arange(N-1), np.arange(1, N)):
-            J[i,i] += a
-            J[j,j] += a
-            J[i,j] = J[j,i] = -a
-        D, P = torch.linalg.eigh(J)
-        D_inv = 1/D
-        D_inv[0] = 0
-        self.P, self.D_inv = P, D_inv
-        self.N = N
+            J[i,i] += self.a
+            J[j,j] += self.a
+            J[i,j] = J[j,i] = - self.a
+        return J
+    
+    def mask(self):
+        diag_mask = torch.eye(self.N, dtype=torch.bool)
+        superdiagonal_mask = torch.roll(diag_mask, shifts=1, dims=1)
+        superdiagonal_mask[:, 0] = 0
+        subdiagonal_mask = torch.roll(diag_mask, shifts=-1, dims=1)
+        subdiagonal_mask[:, -1] = 0
+        return diag_mask+superdiagonal_mask+subdiagonal_mask
 
-    def to(self, device):
-        self.P = self.P.to(device)
-        self.D_inv = self.D_inv.to(device)
+    def forward(self, x):
+        mask_matrix = self.mask_matrix.to(x.device)  # Ensure mask is on the same device as x
+        background = self.background.unsqueeze(0).repeat(x.size(0), 1, 1).to(x.device)  # Ensure background is on the same device as x
+        masked_x = x * mask_matrix.float()  # Apply mask
+        return self.loss_fn(masked_x, background) # Compute and return the loss
+    
+'''
+class HarmonicPrior(nn.Module):
+    def __init__(self, input_shape, hidden_features, output_dim):
+        super().__init__()
+        self.a =3/(3.8**2)
+        self.channels=hidden_features
+        self.output_dim=output_dim
+        self.eigenvalue=SAXS_to_Eigenvalue(input_shape,hidden_features, output_dim)
+        self.eigenvector=SAXS_to_Eigenvector_Cov(input_shape,hidden_features, output_dim)
+
+    def diag_mask(self):
+        diag_mask = torch.eye(self.output_dim, dtype=torch.bool)
+        diag_mask[:, 0] = 0
+        diag_mask[:,-1] = 0
+        diag_mask_2 = torch.zeros((256, 256), dtype=torch.bool)
+        diag_mask_2[0, 0] = 1
+        diag_mask_2[255, 255] = 1
+        return diag_mask, diag_mask_2
+    
+    def superdiagonal_mask(self,diag_mask):
+        superdiagonal_mask = torch.roll(diag_mask, shifts=1, dims=1)
+        superdiagonal_mask[:, 0] = 0
+        return superdiagonal_mask
+    
+    def subdiagonal_mask(self,diag_mask):
+        subdiagonal_mask = torch.roll(diag_mask, shifts=-1, dims=1)
+        subdiagonal_mask[:, -1] = 0
+        return subdiagonal_mask
+
+    def forward(self, x):
+        lambda_value=self.eigenvalue(x)
+        nu_vector=self.eigenvector(x)
+        result = torch.einsum('ij,ijk->ijk', lambda_value, nu_vector)
         
-    def fixed_background(self):
-        return torch.matmul(self.P,torch.sqrt(self.D_inv))
+        batch_size = x.size(0)
 
-    def sample(self, batch_dims=()):
-        return self.P @ (torch.sqrt(self.D_inv)[:,None] * torch.randn(*batch_dims, self.N, 3, device=self.P.device))
+        diag_mask, diag_mask_2 = self.diag_mask()
+        superdiagonal_mask = self.superdiagonal_mask(diag_mask).unsqueeze(0).expand(batch_size, -1, -1)
+        subdiagonal_mask = self.subdiagonal_mask(diag_mask).unsqueeze(0).expand(batch_size, -1, -1)
+        diag_mask = diag_mask.unsqueeze(0).expand(batch_size, -1, -1)
+        diag_mask_2 = diag_mask_2.unsqueeze(0).expand(batch_size, -1, -1)
+
+        result[diag_mask] = 2 * self.a
+        result[diag_mask_2] = self.a
+        result[superdiagonal_mask] = -self.a
+        result[subdiagonal_mask] = -self.a
+
+        return result
+'''
+
+# Torch Module for fixed prior
+#class Fixed_Prior(nn.Module):
+#    def __init__(self, N = 256, a =3/(3.8**2)):
+#    def fixed_background(self):
+#        J = torch.zeros(N, N)
+#        for i, j in zip(np.arange(N-1), np.arange(1, N)):
+#            J[i,i] += a
+#            J[j,j] += a
+#            J[i,j] = J[j,i] = -a
+#        return J
 
 '''
 class HarmonicPrior:

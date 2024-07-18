@@ -7,7 +7,7 @@ from .esmfold import ESMFold
 from .alphafold import AlphaFold
 
 from alphaflow.utils.loss import AlphaFoldLoss
-from alphaflow.utils.diffusion import HarmonicPrior, rmsdalign
+from alphaflow.utils.diffusion import HarmonicPrior, rmsdalign, PriorLoss
 from alphaflow.utils import protein
 
 from openfold.utils.loss import lddt_ca
@@ -29,6 +29,7 @@ from openfold.utils.tensor_utils import (
 )
 from collections import defaultdict
 from openfold.utils.lr_schedulers import AlphaFoldLRScheduler
+import time
 
 def gather_log(log, world_size):
     if world_size == 1:
@@ -48,7 +49,33 @@ def get_log_mean(log):
     return out
 
 
-class ModelWrapper(pl.LightningModule):
+class AlphaSAXS(pl.LightningModule):
+    def __init__(self, config, args, training=True):
+        super().__init__()
+        self.save_hyperparameters()
+        self.cfg = config
+        self.saxs_model = HarmonicPrior(input_shape=512, hidden_features=64, output_dim = config.data.train.crop_size)
+        self.model = AlphaFold(config,
+                extra_input=args and 'extra_input' in args.__dict__ and args.extra_input)
+        if training:
+
+            self.loss = AlphaFoldLoss(config.loss)
+            self.saxs_loss = PriorLoss()
+            self.ema = ExponentialMovingAverage(
+                model=self.model, decay=config.ema.decay
+            )
+            # Change the decay rate to 0.999
+            self.cached_weights = None
+        
+        self.args = args
+        self.generator = torch.Generator().manual_seed(137)
+        self._log = defaultdict(list)
+        self.last_log_time = time.time()
+        self.iter_step = 0
+
+        for name, param in self.model.named_parameters():
+            param.requires_grad = False
+
     def _add_noise(self, batch):
         
         device = batch['aatype'].device
@@ -56,17 +83,18 @@ class ModelWrapper(pl.LightningModule):
         
         # Just change here is OK
         # How to change the to device
-        noisy = self.saxs_model(batch['saxs'])
-        noisy = noisy.to(device)
+        noisy , raw_noise= self.saxs_model(batch['saxs'])
+        #noisy = noisy.to(device)
+        #raw_noise = raw_noise.to(device)
         
         noisy = rmsdalign(batch['pseudo_beta'], noisy, weights=batch['pseudo_beta_mask']).detach()
 
-        try:
-            noisy = rmsdalign(batch['pseudo_beta'], noisy, weights=batch['pseudo_beta_mask']).detach() # ?!?!
-        except:
-            logger.warning('SVD failed to converge!')
-            batch['t'] = torch.ones(batch_dims, device=device)
-            return
+        #try:
+        #    noisy = rmsdalign(batch['pseudo_beta'], noisy, weights=batch['pseudo_beta_mask']).detach() # ?!?!
+        #except:
+        #    logger.warning('SVD failed to converge!')
+        #    batch['t'] = torch.ones(batch_dims, device=device)
+        #    return
         
         t = torch.rand(batch_dims, device=device)
         noisy_beta = (1 - t[:,None,None]) * batch['pseudo_beta'] + t[:,None,None] * noisy
@@ -77,62 +105,8 @@ class ModelWrapper(pl.LightningModule):
         batch_copy['noised_pseudo_beta_dists'] = pseudo_beta_dists
         batch_copy['t'] = t
         
-        return batch_copy
+        return batch_copy, raw_noise
 
-    def disillation_training_step(self, batch):
-        device = batch['aatype'].device
-        batch_dims = batch['seq_length'].shape
-
-        
-        orig_noisy = noisy = self.harmonic_prior.sample(batch_dims)
-        schedule = np.linspace(1, 0, 11)
-
-        orig_batch = {**batch}
-        
-        ## Forward pass of teacher model
-
-        prev_outputs = None
-        self.teacher.eval()
-        with torch.no_grad():
-            for t, s in zip(schedule[:-1], schedule[1:]):
-                output = self.teacher(batch, prev_outputs=prev_outputs)
-                pseudo_beta = pseudo_beta_fn(batch['aatype'], output['final_atom_positions'], None)
-                noisy = rmsdalign(pseudo_beta, noisy)
-                noisy = (s / t) * noisy + (1 - s / t) * pseudo_beta
-                batch['noised_pseudo_beta_dists'] = torch.sum((noisy.unsqueeze(-2) - noisy.unsqueeze(-3)) ** 2, dim=-1)**0.5
-                batch['t'] = torch.ones(batch_dims, device=noisy.device) * s
-            if self.args.distill_self_cond:
-                prev_outputs = output
-                
-        orig_batch['all_atom_positions'] = output['final_atom_positions']
-        for t in [
-            data_transforms.make_atom14_positions,
-            data_transforms.atom37_to_frames,
-            data_transforms.atom37_to_torsion_angles(""),
-            data_transforms.make_pseudo_beta(""),
-            data_transforms.get_backbone_frames,
-            data_transforms.get_chi_angles,
-        ]:
-            orig_batch = t(orig_batch)
-
-        orig_batch['noised_pseudo_beta_dists'] = torch.sum((orig_noisy.unsqueeze(-2) - orig_noisy.unsqueeze(-3)) ** 2, dim=-1)**0.5
-        orig_batch['t'] = torch.ones(batch_dims, device=noisy.device)         
-        
-        student_output = self.model(orig_batch)
-        loss, loss_breakdown = self.loss(student_output, orig_batch, _return_breakdown=True)
-
-        with torch.no_grad():
-            metrics = self._compute_validation_metrics(orig_batch, student_output, superimposition_metrics=False)
-    
-        for k, v in loss_breakdown.items():
-            self.log(k, [v.item()])
-        for k, v in metrics.items():
-            self.log(k, [v.item()])
-
-        self.log('dur', [time.time() - self.last_log_time])
-        self.last_log_time = time.time()
-        return loss
-        
     def training_step(self, batch, batch_idx, stage='train'):
         self.iter_step += 1
         device = batch["aatype"].device
@@ -144,10 +118,13 @@ class ModelWrapper(pl.LightningModule):
             if(self.ema.device != device):
                 self.ema.to(device)
 
+        self.saxs_model.to(device)
             
         # like line 159 self._add_noise model change batch.
         #if torch.rand(1, generator=self.generator).item() < self.args.noise_prob:
-        batch = self._add_noise(batch)
+        start_time_noise = time.time()
+        batch, noisy = self._add_noise(batch)
+        end_time_noise = time.time()
 
         self.log('time', [batch['t'].mean().item()])
         #else:
@@ -161,10 +138,19 @@ class ModelWrapper(pl.LightningModule):
         
         outputs = None
         #if torch.rand(1, generator=self.generator).item() < self.args.self_cond_prob:  
-
+        start_time_alphafold = time.time()
         outputs = self.model(batch, prev_outputs=outputs)
+        end_time_alphafold = time.time()
 
+        start_time_loss = time.time()
         loss, loss_breakdown = self.loss(outputs, batch, _return_breakdown=True)
+        print(loss)
+        print(self.saxs_loss(noisy))
+        saxs_loss = self.saxs_loss(noisy)
+        loss += saxs_loss
+        loss_breakdown['saxs_loss'] = saxs_loss
+
+        end_time_loss = time.time()
 
         with torch.no_grad():
             metrics = self._compute_validation_metrics(batch, outputs, superimposition_metrics=False)
@@ -176,6 +162,14 @@ class ModelWrapper(pl.LightningModule):
 
         self.log('dur', [time.time() - self.last_log_time])
         self.last_log_time = time.time()
+
+        end_time_everything = time.time()
+
+        print("Noise Time: ", end_time_noise - start_time_noise)
+        print("AlphaFold Time: ", end_time_alphafold - start_time_alphafold)
+        print("Loss Time: ", end_time_loss - start_time_loss)
+        print("Everything Time: ", end_time_everything - start_time_noise)
+
         return loss
         
     def validation_step(self, batch, batch_idx):
@@ -234,6 +228,7 @@ class ModelWrapper(pl.LightningModule):
     def restore_cached_weights(self):
         logger.info('Restoring cached weights')
         self.model.load_state_dict(self.cached_weights)
+        self.saxs_model.load_state_dict(self.saxs_cached_weights)
         self.cached_weights = None
 
     def load_ema_weights(self):
@@ -243,6 +238,7 @@ class ModelWrapper(pl.LightningModule):
         logger.info('Loading EMA weights')
         clone_param = lambda t: t.detach().clone()
         self.cached_weights = tensor_tree_map(clone_param, self.model.state_dict())
+        self.saxs_cached_weights = self.saxs_model.state_dict()
         self.model.load_state_dict(self.ema.state_dict()["params"])
         
     def on_before_zero_grad(self, *args, **kwargs):
@@ -250,23 +246,6 @@ class ModelWrapper(pl.LightningModule):
             self.ema.update(self.model)
 
     def on_load_checkpoint(self, checkpoint):
-        if 'distillation' not in self.args.__dict__:
-            self.args.distillation = False
-        if self.args.distillation:
-            logger.info('Loading teacher model')
-            def upgrade_state_dict(state_dict):
-                import re
-                """Removes prefixes 'model.encoder.sentence_encoder.' and 'model.encoder.'."""
-                prefixes = ["esmfold."]
-                pattern = re.compile("^" + "|".join(prefixes))
-                state_dict = {pattern.sub("", name): param for name, param in state_dict.items()}
-                return state_dict
-            try:
-                self.teacher.load_state_dict(upgrade_state_dict(checkpoint['state_dict']))
-                self.teacher.requires_grad_(False)
-            except:
-                logger.info('Loading teacher model failed, this is expected at distilled inference-time')                
-            
         logger.info('Loading EMA state dict')
         if not self.args.no_ema:
             ema = checkpoint["ema"]
@@ -463,32 +442,4 @@ class ModelWrapper(pl.LightningModule):
             }
         }
 
-    
-class AlphaFoldWrapper(ModelWrapper):
-    def __init__(self, config, args, training=True):
-        super().__init__()
-        self.save_hyperparameters()
-        self.cfg = config
-        self.saxs_model = HarmonicPrior(input_shape=512, hidden_features=64, output_dim = config.data.train.crop_size)
-        self.model = AlphaFold(config,
-                extra_input=args and 'extra_input' in args.__dict__ and args.extra_input)
-        if training:
-
-            self.loss = AlphaFoldLoss(config.loss)
-            self.ema = ExponentialMovingAverage(
-                model=self.model, decay=config.ema.decay
-            )
-            self.cached_weights = None
-        
-        self.args = args
-        self.generator = torch.Generator().manual_seed(137)
-        self._log = defaultdict(list)
-        self.last_log_time = time.time()
-        self.iter_step = 0
-
-        for name, param in self.model.named_parameters():
-            if "saxs_model" not in name:
-                param.requires_grad = False
-            else: 
-                print(name)
    

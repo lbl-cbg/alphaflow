@@ -13,10 +13,14 @@ from openfold.utils.exponential_moving_average import ExponentialMovingAverage
 from alphaflow.model.wrapper import  AlphaFoldWrapper
 from openfold.utils.import_weights import import_jax_weights_
 
-torch.set_float32_matmul_precision("high")
+
 from alphaflow.config import model_config
 from alphaflow.data.data_modules import OpenFoldSingleDataset, OpenFoldBatchCollator, OpenFoldDataset
 from alphaflow.data.inference import AlphaFoldCSVDataset
+from alphaflow.model.new_model import AlphaSAXS
+torch.set_float32_matmul_precision("medium")
+
+
 
 config = model_config(
     'initial_training',
@@ -65,7 +69,7 @@ def main():
         val_pdb_chains = pd.read_csv(args.val_csv, index_col='name')
         valset = OpenFoldSingleDataset(
             data_dir = args.train_data_dir,
-            alignment_dir = args.train_msa_dir,
+            alignment_dir = args.val_msa_dir,
             saxs_dir=args.saxs_dir,
             pdb_chains = val_pdb_chains,
             config = data_cfg,
@@ -99,7 +103,7 @@ def main():
 
 
     trainer = pl.Trainer(
-        accelerator="gpu",
+        accelerator="gpu",num_nodes=1 ,devices=1,
         max_epochs=args.epochs,
         limit_train_batches=args.limit_batches or 1.0,
         limit_val_batches=args.limit_batches or 1.0,
@@ -113,30 +117,30 @@ def main():
         )],
         accumulate_grad_batches=args.accumulate_grad,
         check_val_every_n_epoch=args.val_freq,
-        logger=False,
+        logger=False, 
+        profiler="simple"
     )
 
     if args.mode == 'alphafold':
-        model = AlphaFoldWrapper(config, args)
-        if args.ckpt is None:
-            logger.info("Loading the model")
-            #Originally this is model.esmfold
-            import_jax_weights_(model.model, 'params_model_1.npz', version='model_3')
-            if not args.no_ema:
-                model.ema = ExponentialMovingAverage(
-                    model=model.model, decay=config.ema.decay
+        model = AlphaSAXS(config, args)
+        logger.info("Loading the model")
+        #Originally this is model.esmfold
+        import_jax_weights_(model.model, 'params_model_1.npz', version='model_3')
+        if not args.no_ema:
+            model.ema = ExponentialMovingAverage(
+                model=model.model, decay=config.ema.decay
                 ) # need to initialize EMA this way at the beginning
     else:
         raise ValueError("This part is removed for now.")
 
-    if args.restore_weights_only:
-        model.load_state_dict(torch.load(args.ckpt, map_location='cpu')['state_dict'], strict=False)
-        args.ckpt = None
-        if not args.no_ema:
-            model.ema = ExponentialMovingAverage(
-                model=model.model, decay=config.ema.decay
-            ) # need to initialize EMA this way at the beginning
-    
+
+#    if args.restore_weights_only:
+#        model.load_state_dict(torch.load(args.ckpt, map_location='cpu')['state_dict'], strict=False)
+#        args.ckpt = None
+#        if not args.no_ema:
+#            model.ema = ExponentialMovingAverage(
+#                model=model.model, decay=config.ema.decay
+#            ) # need to initialize EMA this way at the beginning
     
     if args.validate:
         trainer.validate(model, val_loader, ckpt_path=args.ckpt)

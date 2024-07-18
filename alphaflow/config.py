@@ -202,6 +202,7 @@ NUM_RES = "num residues placeholder"
 NUM_MSA_SEQ = "msa placeholder"
 NUM_EXTRA_SEQ = "extra msa placeholder"
 NUM_TEMPLATES = "num templates placeholder"
+NUM_SAXS = "num saxs points"
 
 config = mlc.ConfigDict(
     {
@@ -273,6 +274,7 @@ config = mlc.ConfigDict(
                     ],
                     "true_msa": [NUM_MSA_SEQ, NUM_RES],
                     "use_clamped_fape": [],
+                    "SAXS" : [NUM_SAXS],
                 },
                 "masked_msa": {
                     "profile_prob": 0.1,
@@ -298,6 +300,7 @@ config = mlc.ConfigDict(
                     "between_segment_residues",
                     "deletion_matrix",
                     "no_recycling_iters",
+                    "saxs",
                 ],
                 "use_templates": templates_enabled,
                 "use_template_torsion_angles": embed_template_torsion_angles,

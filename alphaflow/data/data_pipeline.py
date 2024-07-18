@@ -28,12 +28,12 @@ from openfold.np import residue_constants, protein
 
 FeatureDict = Mapping[str, np.ndarray]
 
-def process_saxs_feats(self, saxs_dir: str, pad_length=512) -> FeatureDict:
+def process_saxs_feats(saxs_file: str, pad_length=512) -> FeatureDict:
     """
     Process SAXS features from the given directory.
 
     Args:
-        saxs_dir (str): The directory containing the SAXS data.
+        saxs_file (str): The path of the SAXS data file.
         pad_length (int, optional): The desired length of the padded SAXS data. Defaults to 512.
 
     Returns:
@@ -42,8 +42,8 @@ def process_saxs_feats(self, saxs_dir: str, pad_length=512) -> FeatureDict:
     Raises:
         ValueError: If no SAXS data is available for the given input.
     """
-    if os.path.isfile(saxs_dir):
-        pr_df = pd.read_csv(saxs_dir)
+    if os.path.isfile(saxs_file):
+        pr_df = pd.read_csv(saxs_file)
     else:
         raise ValueError("No SAXS data available for given input")
         

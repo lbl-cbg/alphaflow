@@ -109,6 +109,8 @@ def np_example_to_features(
             dtype=torch.float32,
         )
 
+    features['saxs'] = tensor_dict['saxs']
+
     return {k: v for k, v in features.items()}
 
 

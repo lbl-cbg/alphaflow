@@ -127,7 +127,7 @@ class OpenFoldSingleDataset(torch.utils.data.Dataset):
         )
 
         if(not self._output_raw):
-            self.feature_pipeline = feature_pipeline.FeaturePipeline(config) 
+            self.feature_pipeline = feature_pipeline.FeaturePipeline(self.config) 
 
     # def _parse_mmcif(self, path, file_id, chain_id, alignment_dir, alignment_index):
         
@@ -213,9 +213,9 @@ class OpenFoldSingleDataset(torch.utils.data.Dataset):
         pdb_id, chain = name.split('_')
         
         # Parse the PDB file and extract SAXS features and load MSA features.
-        pdb_features = self._parse_pdb(f"{self.data_dir}/pdb/fixed_{item.name}.pdb")
-        msa_features = self.data_pipeline._process_msa_feats(f'{self.alignment_dir}/{item.msa_id}', item.seqres, alignment_index=None)
-        saxs_features = data_pipeline.process_saxs_feats(f'{self.saxs_dir}/{item.saxs_loc}')
+        pdb_features = self._parse_pdb(f'{self.data_dir}/pdb/fixed_{item.name}.pdb')
+        msa_features = self.data_pipeline._process_msa_feats(f'{self.alignment_dir}/{item.name}', item.seqres, alignment_index=None)
+        saxs_features = data_pipeline.process_saxs_feats(saxs_file=f'{self.saxs_dir}/{item.name}.pdb.pr.csv')
         
         # Combine the features as data and process them with the feature pipeline to generate the final features as numpy arrays.
         data = {**pdb_features, **msa_features, **saxs_features}

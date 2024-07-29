@@ -5,3 +5,15 @@ __pycache__/
 # Exclude Jupyter Notebook checkpoints
 .ipynb_checkpoints/
 **/.ipynb_checkpoints/
+
+# Exclude log files
+*.log
+
+# Exclude yaml files
+*.yaml
+
+# Exclude wandb files
+wandb/
+
+# Exclude json files
+*.json

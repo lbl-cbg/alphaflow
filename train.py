@@ -1,25 +1,25 @@
 from alphaflow.utils.parsing import parse_train_args
-args = parse_train_args()
+
 
 from alphaflow.utils.logging import get_logger
-logger = get_logger(__name__)
+
 import torch, tqdm, os, wandb
 import pandas as pd
 
-from functools import partial
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 from openfold.utils.exponential_moving_average import ExponentialMovingAverage
-from alphaflow.model.wrapper import  AlphaFoldWrapper
 from openfold.utils.import_weights import import_jax_weights_
 
 
 from alphaflow.config import model_config
-from alphaflow.data.data_modules import OpenFoldSingleDataset, OpenFoldBatchCollator, OpenFoldDataset
+from alphaflow.data.data_modules import OpenFoldSingleDataset, OpenFoldBatchCollator
 from alphaflow.data.inference import AlphaFoldCSVDataset
 from alphaflow.model.new_model import AlphaSAXS
-torch.set_float32_matmul_precision("medium")
 
+torch.set_float32_matmul_precision("medium")
+args = parse_train_args()
+logger = get_logger(__name__)
 
 
 config = model_config(
@@ -51,6 +51,7 @@ def main():
             project="alphaflow",
             name=args.run_name,
             config=args,
+            mode='offline'
         )
 
     logger.info("Loading the chains dataframe")
@@ -103,22 +104,22 @@ def main():
 
 
     trainer = pl.Trainer(
-        accelerator="gpu",num_nodes=1 ,devices=1,
+        accelerator="gpu",num_nodes=2 ,devices=4,
         max_epochs=args.epochs,
         limit_train_batches=args.limit_batches or 1.0,
         limit_val_batches=args.limit_batches or 1.0,
         num_sanity_val_steps=0,
-        enable_progress_bar=not args.wandb,
+        enable_progress_bar=True,
         gradient_clip_val=args.grad_clip,
         callbacks=[ModelCheckpoint(
             dirpath=os.environ["MODEL_DIR"], 
             save_top_k=-1,
-            every_n_epochs=args.ckpt_freq,
+            every_n_train_steps=100,
         )],
         accumulate_grad_batches=args.accumulate_grad,
         check_val_every_n_epoch=args.val_freq,
         logger=False, 
-        profiler="simple"
+        profiler="pytorch"
     )
 
     if args.mode == 'alphafold':

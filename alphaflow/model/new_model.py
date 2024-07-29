@@ -122,9 +122,9 @@ class AlphaSAXS(pl.LightningModule):
             
         # like line 159 self._add_noise model change batch.
         #if torch.rand(1, generator=self.generator).item() < self.args.noise_prob:
-        start_time_noise = time.time()
+        #start_time_noise = time.time()
         batch, noisy = self._add_noise(batch)
-        end_time_noise = time.time()
+        #end_time_noise = time.time()
 
         self.log('time', [batch['t'].mean().item()])
         #else:
@@ -138,19 +138,19 @@ class AlphaSAXS(pl.LightningModule):
         
         outputs = None
         #if torch.rand(1, generator=self.generator).item() < self.args.self_cond_prob:  
-        start_time_alphafold = time.time()
+        #start_time_alphafold = time.time()
         outputs = self.model(batch, prev_outputs=outputs)
-        end_time_alphafold = time.time()
+        #end_time_alphafold = time.time()
 
-        start_time_loss = time.time()
+        #start_time_loss = time.time()
         loss, loss_breakdown = self.loss(outputs, batch, _return_breakdown=True)
-        print(loss)
+        #print(loss)
         print(self.saxs_loss(noisy))
         saxs_loss = self.saxs_loss(noisy)
         loss += saxs_loss
         loss_breakdown['saxs_loss'] = saxs_loss
 
-        end_time_loss = time.time()
+        #end_time_loss = time.time()
 
         with torch.no_grad():
             metrics = self._compute_validation_metrics(batch, outputs, superimposition_metrics=False)
@@ -163,12 +163,12 @@ class AlphaSAXS(pl.LightningModule):
         self.log('dur', [time.time() - self.last_log_time])
         self.last_log_time = time.time()
 
-        end_time_everything = time.time()
+        #end_time_everything = time.time()
 
-        print("Noise Time: ", end_time_noise - start_time_noise)
-        print("AlphaFold Time: ", end_time_alphafold - start_time_alphafold)
-        print("Loss Time: ", end_time_loss - start_time_loss)
-        print("Everything Time: ", end_time_everything - start_time_noise)
+        #print("Noise Time: ", end_time_noise - start_time_noise)
+        #print("AlphaFold Time: ", end_time_alphafold - start_time_alphafold)
+        #print("Loss Time: ", end_time_loss - start_time_loss)
+        #print("Everything Time: ", end_time_everything - start_time_noise)
 
         return loss
         

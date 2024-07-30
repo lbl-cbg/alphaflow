@@ -145,7 +145,7 @@ class AlphaSAXS(pl.LightningModule):
         #start_time_loss = time.time()
         loss, loss_breakdown = self.loss(outputs, batch, _return_breakdown=True)
         #print(loss)
-        print(self.saxs_loss(noisy))
+        #print(self.saxs_loss(noisy))
         saxs_loss = self.saxs_loss(noisy)
         loss += saxs_loss
         loss_breakdown['saxs_loss'] = saxs_loss

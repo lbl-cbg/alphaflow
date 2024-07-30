@@ -17,3 +17,6 @@ wandb/
 
 # Exclude json files
 *.json
+
+# Exclude output files
+*.out

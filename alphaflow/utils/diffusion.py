@@ -90,7 +90,7 @@ class HarmonicPrior(nn.Module):
         contact_map_herm=pre_contact_map + torch.transpose(pre_contact_map,1,2)
         contact_map_energy = self.energy_reshape(contact_map_herm)
         step1_time=time.time()
-        lambda_value, nu_vector = torch.linalg.eigh(contact_map_herm)
+        lambda_value, nu_vector = torch.linalg.eigh(contact_map_energy)
         step2_time = time.time()
         batch_dims=x.size(0)
         self.lambda_value = torch.clamp(lambda_value, min=0.0001)
@@ -123,8 +123,8 @@ class PriorLoss(nn.Module):
         N = self.N
         J = torch.zeros(N, N)
         for i, j in zip(np.arange(N-1), np.arange(1, N)):
-            J[i,i] += self.a
-            J[j,j] += self.a
+            #J[i,i] += self.a
+            #J[j,j] += self.a
             J[i,j] = J[j,i] = - self.a
         return J
     # I should remove the diag_mask

@@ -67,19 +67,58 @@ class SAXS_to_Contact_Map(nn.Module):
         h_ = self.relu_layer(h_)
         return -1 * h_
     
+class SAXS_to_Contact_Map(nn.Module):
+    def __init__(self, input_shape, hidden_features, output_dim):
+        super().__init__()
+        self.channels=hidden_features
+        self.saxs_layer_norm=nn.LayerNorm(input_shape)
+        self.q = nn.Linear(input_shape, hidden_features)
+        self.k = nn.Linear(1, hidden_features)
+        self.v = nn.Linear(1, hidden_features)
+        self.out_layer = nn.Linear(hidden_features, output_dim)
+        self.relu_layer = nn.ReLU()
+    def forward(self, x):
+        h_ = self.saxs_layer_norm(x)
+        h_ = h_[:, :, np.newaxis]
+        q = self.q(h_.permute(0,2,1))
+        k = self.k(h_)
+        v = self.v(h_)
+        w_ = torch.bmm(q,k.permute(0,2,1))
+        w_ = w_ * (self.channels**(-0.5))
+        w_ = torch.nn.functional.softmax(w_,dim=2)
+        h_ = torch.bmm(w_,v)
+        h_ = self.out_layer(h_)
+        #print(h_.shape)
+        h_ = torch.bmm(torch.transpose(h_, 1, 2), h_)
+        #print(h_.shape)
+        h_ = self.relu_layer(h_)
+        h_ = torch.mul(h_, -1)
+        return h_
+    
 class HarmonicPrior(nn.Module):
     def __init__(self, input_shape, hidden_features, output_dim):
         super().__init__()
-        self.a =3/(3.8**2)
+        self.a = 3/(3.8**2)
         self.input_shape=input_shape
         self.channels=hidden_features
         self.output_dim=output_dim
+        self.background_mask = self.mask()
         self.pre_contact_map=SAXS_to_Contact_Map(input_shape,hidden_features, output_dim)
         
+    def mask(self):
+        diag_mask = torch.eye(self.output_dim, dtype=torch.bool)
+        superdiagonal_mask = torch.roll(diag_mask, shifts=1, dims=1)
+        superdiagonal_mask[:, 0] = 0
+        subdiagonal_mask = torch.roll(diag_mask, shifts=-1, dims=1)
+        subdiagonal_mask[:, -1] = 0
+        return superdiagonal_mask + subdiagonal_mask
+    
     def energy_reshape(self, contact):
+        background_mask = self.background_mask.unsqueeze(0).expand(contact.shape[0],-1,-1)
+        contact[background_mask] = -1 * self.a
         diag_mask = torch.ones_like(contact[0])
         diag_mask = diag_mask.fill_diagonal_(0)
-        masked_contact = contact*diag_mask
+        masked_contact = contact * diag_mask
         column_sums = -1 * torch.sum(masked_contact,dim=2)
         result = torch.diagonal_scatter(masked_contact, column_sums, dim1=1, dim2=2)
         return result
@@ -87,13 +126,12 @@ class HarmonicPrior(nn.Module):
     def forward(self, x):
         start_time=time.time()
         pre_contact_map=self.pre_contact_map(x)
-        contact_map_herm=pre_contact_map + torch.transpose(pre_contact_map,1,2)
-        contact_map_energy = self.energy_reshape(contact_map_herm)
+        contact_map_energy = self.energy_reshape(pre_contact_map)
         step1_time=time.time()
-        lambda_value, nu_vector = torch.linalg.eigh(contact_map_herm)
+        lambda_value, nu_vector = torch.linalg.eigh(contact_map_energy)
         step2_time = time.time()
         batch_dims=x.size(0)
-        self.lambda_value = torch.clamp(lambda_value, min=0.0001)
+        self.lambda_value = torch.clamp(lambda_value, min=0.00001)
         lambda_value_inverse = torch.sqrt(1/self.lambda_value)
         step3_time = time.time()
         rand=torch.randn(batch_dims, self.output_dim, 3, device=x.device)
@@ -104,12 +142,13 @@ class HarmonicPrior(nn.Module):
         print('step 1:', step1_time-start_time)
         print('step 2:', step2_time-step1_time)
         print('step 3:', step3_time-step2_time)
-        #print('step 4:', step4_time-step3_time)
-        #print('step 5:', step5_time-step4_time)
+        print('step 4:', step4_time-step3_time)
+        print('step 5:', step5_time-step4_time)
         #print(return_value.shape)
         #print(torch.sum(contact_map_energy,dim=(2,1)))
         return return_value,contact_map_energy
-    
+
+'''   
 class PriorLoss(nn.Module):
     def __init__(self, N=256, a =3/(3.8**2)):
         super().__init__()
@@ -123,8 +162,8 @@ class PriorLoss(nn.Module):
         N = self.N
         J = torch.zeros(N, N)
         for i, j in zip(np.arange(N-1), np.arange(1, N)):
-            J[i,i] += self.a
-            J[j,j] += self.a
+            #J[i,i] += self.a
+            #J[j,j] += self.a
             J[i,j] = J[j,i] = - self.a
         return J
     # I should remove the diag_mask
@@ -141,3 +180,4 @@ class PriorLoss(nn.Module):
         background = self.background.unsqueeze(0).repeat(x.size(0), 1, 1).to(x.device)  # Ensure background is on the same device as x
         masked_x = x * mask_matrix.float()  # Apply mask
         return self.loss_fn(masked_x, background) # Compute and return the loss
+'''

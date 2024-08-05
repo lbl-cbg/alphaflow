@@ -504,9 +504,9 @@ def lddt_loss(
         eps + torch.sum(all_atom_mask, dim=-1)
     )
 
-    loss = loss * (
-        (resolution >= min_resolution) & (resolution <= max_resolution)
-    )
+    #loss = loss * (
+    #    (resolution >= min_resolution) & (resolution <= max_resolution)
+    #)
 
     # Average over the batch dimension
     loss = torch.mean(loss)

@@ -65,8 +65,6 @@ def parse_train_args():
     os.environ["MODEL_DIR"] = os.path.join("workdir", args.run_name)
     os.environ["WANDB_LOGGING"] = str(int(args.wandb))
     os.environ["WANDB_NAME"] = "test_run_Alpha_SAXS"
-    os.environ["WANDB_API_KEY"] = "60d9c315bb174c772619ba6a03bb43e42e36b96b"
-    os.environ["WANDB_ENTITY"] = "fyu2"
     #if args.wandb:
         #if subprocess.check_output(["git", "status", "-s"]):
         #    exit()

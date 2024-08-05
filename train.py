@@ -46,12 +46,10 @@ def main():
     
     if args.wandb:
         wandb.init(
-            entity=os.environ["WANDB_ENTITY"],
-            settings=wandb.Settings(start_method="fork"),
             project="alphaflow",
             name=args.run_name,
             config=args,
-            mode='offline'
+            mode='online'
         )
 
     logger.info("Loading the chains dataframe")

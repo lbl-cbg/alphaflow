@@ -7,7 +7,7 @@ from .esmfold import ESMFold
 from .alphafold import AlphaFold
 
 from alphaflow.utils.loss import AlphaFoldLoss
-from alphaflow.utils.diffusion import HarmonicPrior, rmsdalign, PriorLoss
+from alphaflow.utils.diffusion import HarmonicPrior, rmsdalign
 from alphaflow.utils import protein
 
 from openfold.utils.loss import lddt_ca
@@ -60,7 +60,7 @@ class AlphaSAXS(pl.LightningModule):
         if training:
 
             self.loss = AlphaFoldLoss(config.loss)
-            self.saxs_loss = PriorLoss()
+            #self.saxs_loss = PriorLoss()
             self.ema = ExponentialMovingAverage(
                 model=self.model, decay=config.ema.decay
             )
@@ -145,11 +145,10 @@ class AlphaSAXS(pl.LightningModule):
         #start_time_loss = time.time()
         loss, loss_breakdown = self.loss(outputs, batch, _return_breakdown=True)
         #print(loss)
-        print(self.saxs_loss(noisy))
-        saxs_loss = self.saxs_loss(noisy)
-        loss += saxs_loss
-        loss_breakdown['saxs_loss'] = saxs_loss
-
+        #print(self.saxs_loss(noisy))
+        #saxs_loss = self.saxs_loss(noisy)
+        #loss += saxs_loss
+        print(loss)
         #end_time_loss = time.time()
 
         with torch.no_grad():

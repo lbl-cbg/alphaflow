@@ -11,7 +11,7 @@ module load python
 module load gcc/10.3.0
 module load cudatoolkit/11.5
 
-MODEL_LOC='/pscratch/sd/l/lemonboy/alphaflow_develop/alphaflow'
+MODEL_LOC='/pscratch/sd/l/lemonboy/alphaflow_new_branch/alphaflow'
 DATA_LOC='/pscratch/sd/l/lemonboy/PDB70_verB_fixed_data'
 
 srun /pscratch/sd/l/lemonboy/alphaflow_reinstall/bin/python \
@@ -21,12 +21,12 @@ srun /pscratch/sd/l/lemonboy/alphaflow_reinstall/bin/python \
 	--accumulate_grad 8 \
 	--train_epoch_len 80 \
 	--pdb_chain "$DATA_LOC/result_Feng_subset/input_training.csv" \
-	--val_csv "$DATA_LOC"/result_Feng_subset/input_validation.csv" \
+	--val_csv "$DATA_LOC/result_Feng_subset/input_validation.csv" \
 	--train_data_dir "$DATA_LOC/result" \
 	--train_msa_dir "$DATA_LOC/result_Feng_subset" \
 	--val_msa_dir "$DATA_LOC/result_Feng_subset" \
-	--saxs_dir "$DATA_LOC"/result/saxs_r" \
-	--run_name "test" \
+	--saxs_dir "$DATA_LOC/result/saxs_r" \
+	--run_name "test_new_branch" \
 	--normal_validate \
 	--wandb
 

@@ -6,6 +6,7 @@ from .data_pipeline import DataPipeline
 from .feature_pipeline import FeaturePipeline
 from openfold.data.data_transforms import make_atom14_masks
 import alphaflow.utils.protein as protein
+from alphaflow.data import data_pipeline
 
 def seq_to_tensor(seq):
     unk_idx = residue_constants.restype_order_with_x["X"]
@@ -15,9 +16,10 @@ def seq_to_tensor(seq):
     return encoded
 
 class AlphaFoldCSVDataset:
-    def __init__(self, config, path, mmcif_dir=None, msa_dir=None, templates_dir=None):
+    def __init__(self, config, path, saxs_dir ,mmcif_dir=None, msa_dir=None, templates_dir=None):
         super().__init__()
         self.pdb_chains = pd.read_csv(path, index_col='name')
+        self.saxs_dir = saxs_dir
         self.msa_dir = msa_dir
         self.mmcif_dir = mmcif_dir
         self.data_pipeline = DataPipeline(template_featurizer=None)
@@ -31,7 +33,7 @@ class AlphaFoldCSVDataset:
 
         item = self.pdb_chains.iloc[idx]
         
-        mmcif_feats = self.data_pipeline.process_str(item.seqres, item.name)
+        pdb_feats = self.data_pipeline.process_str(item.seqres, item.name)
         if self.templates_dir:
             path = f"{self.templates_dir}/{item.name}.pdb"
             with open(path) as f:
@@ -42,7 +44,10 @@ class AlphaFoldCSVDataset:
         try: msa_id = item.msa_id
         except: msa_id = item.name
         msa_features = self.data_pipeline._process_msa_feats(f'{self.msa_dir}/{msa_id}', item.seqres, alignment_index=None)
-        data = {**mmcif_feats, **msa_features}
+        
+        saxs_features = data_pipeline.process_saxs_feats(saxs_file=f'{self.saxs_dir}/{item.name}.pdb.pr.csv')
+
+        data = {**pdb_feats, **msa_features, **saxs_features}
 
         feats = self.feature_pipeline.process_features(data, mode='predict') 
         if self.templates_dir:
@@ -52,10 +57,10 @@ class AlphaFoldCSVDataset:
         feats['seqres'] = item.seqres
         make_atom14_masks(feats)
 
-        if self.mmcif_dir is not None:
-            pdb_id, chain = item.name.split('_')
-            with open(f"{self.mmcif_dir}/{pdb_id[1:3]}/{pdb_id}.cif") as f:
-                feats['ref_prot'] = protein.from_mmcif_string(f.read(), chain, name=item.name)
+        #if self.mmcif_dir is not None:
+        #    pdb_id, chain = item.name.split('_')
+        #    with open(f"{self.mmcif_dir}/{pdb_id[1:3]}/{pdb_id}.cif") as f:
+        #        feats['ref_prot'] = protein.from_mmcif_string(f.read(), chain, name=item.name)
                 
         return feats
 

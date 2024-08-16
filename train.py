@@ -46,16 +46,17 @@ def main():
     
     if args.wandb:
         wandb.init(
-            entity=os.environ["WANDB_ENTITY"],
-            settings=wandb.Settings(start_method="fork"),
             project="alphaflow",
             name=args.run_name,
             config=args,
-            mode='offline'
+            mode='online'
         )
 
     logger.info("Loading the chains dataframe")
     pdb_chains = pd.read_csv(args.pdb_chains, index_col='name')
+
+    # Define the training and validation datasets
+    # The OpenFoldSingleDataset is altered to include SAXS data.
     trainset = OpenFoldSingleDataset(
         data_dir = args.train_data_dir,
         alignment_dir = args.train_msa_dir,
@@ -66,6 +67,9 @@ def main():
         subsample_pos = args.sample_train_confs,
         first_as_template = args.first_as_template,
     )
+
+    # If normal_validate is set, the validation dataset is created using the same obejcts as the training dataset.
+    # And the validation process is using the training function
     if args.normal_validate:
         val_pdb_chains = pd.read_csv(args.val_csv, index_col='name')
         valset = OpenFoldSingleDataset(
@@ -80,11 +84,13 @@ def main():
             first_as_template = args.first_as_template,
         )   
     else:
+    # Here the validation dataset is created using a diiferent object which is defined in the inference module.
+    # This validation process is using the inference function defined in the model.
         valset = AlphaFoldCSVDataset(
-            data_cfg,
-            args.val_csv,
+            config = data_cfg,
+            path = args.val_csv,
             mmcif_dir=args.mmcif_dir,
-            data_dir=args.train_data_dir,
+            saxs_dir=args.saxs_dir,
             msa_dir=args.val_msa_dir,
         )
     
@@ -102,9 +108,9 @@ def main():
         shuffle=not args.filter_chains,
     )
 
-
+    # I believe we should add another ModelCheckpoint for each epoch.
     trainer = pl.Trainer(
-        accelerator="gpu",num_nodes=2 ,devices=4,
+        accelerator="gpu",num_nodes=2 ,devices='auto',
         max_epochs=args.epochs,
         limit_train_batches=args.limit_batches or 1.0,
         limit_val_batches=args.limit_batches or 1.0,
@@ -122,18 +128,20 @@ def main():
         profiler="pytorch"
     )
 
+    # Mode is useless for now. It is always set to alphafold. 
     if args.mode == 'alphafold':
         model = AlphaSAXS(config, args)
         logger.info("Loading the model")
-        #Originally this is model.esmfold
+        # I think this part will only load the model at the start of the training. And will be overwritten by the checkpoint.
         import_jax_weights_(model.model, 'params_model_1.npz', version='model_3')
         if not args.no_ema:
             model.ema = ExponentialMovingAverage(
                 model=model.model, decay=config.ema.decay
-                ) # need to initialize EMA this way at the beginning
+                ) # need to initialize EMA this way at the beginning (Why?)
     else:
         raise ValueError("This part is removed for now.")
 
+#    Should we place this part to the import_jax_weights_ function? And set a if statement for it?
 
 #    if args.restore_weights_only:
 #        model.load_state_dict(torch.load(args.ckpt, map_location='cpu')['state_dict'], strict=False)

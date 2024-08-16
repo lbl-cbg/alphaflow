@@ -40,8 +40,18 @@ def kabsch_rmsd(a, b, weights=None):
     out = (out * weights).sum(-1) / weights.sum(-1)
     return torch.sqrt(out)
 
-    
 class SAXS_to_Contact_Map(nn.Module):
+    '''
+    This module takes a SAXS curve and returns a contact map.
+    
+    The SAXS curve is a 1D tensor of shape (batch_size, N) where N is the number of points in the SAXS curve.
+    Currently, the SAXS curve has a size of 512 points.
+    The contact map is a 3D tensor of shape (batch_size, N, N) where N is the number of points in the output.
+    Currently, the N is set to 256 which is the crop size of the AlphaFold model.
+
+    Then we use a attention model to convert the 1D tensor to a 3D tensor.
+    The output matrix should be seminegative definite.
+    '''
     def __init__(self, input_shape, hidden_features, output_dim):
         super().__init__()
         self.channels=hidden_features
@@ -66,8 +76,17 @@ class SAXS_to_Contact_Map(nn.Module):
         h_ = self.out_layer(h_)
         h_ = self.relu_layer(h_)
         return -1 * h_
-    
+
 class HarmonicPrior(nn.Module):
+    '''
+    This module is the Harmonic Prior module.
+    It use the SAXS_to_Contact_Map module to convert the SAXS curve to a contact map.
+    And then change the diagonal of the contact map to make the sum of each row and column to be 0.
+    This will make the map become semipositve definite by converting to the form of (x-y)^2.
+    Then we use the eigenvalue decomposition to get the eigenvalues and eigenvectors.
+    And sample 256 points as the noise coordinates for the beta-carbon atoms.
+    For sequence length shorter than 256, we will get the first N coordinates in the actual model.
+    '''
     def __init__(self, input_shape, hidden_features, output_dim):
         super().__init__()
         self.a =3/(3.8**2)
@@ -111,6 +130,11 @@ class HarmonicPrior(nn.Module):
         return return_value,contact_map_energy
     
 class PriorLoss(nn.Module):
+    '''
+    This module is the loss function for the Harmonic Prior module.
+    It make the superdiagonal and subdiagonal of the contact map to be a.
+    This will constraint the distance of the nearest neighbors atoms.
+    '''
     def __init__(self, N=256, a =3/(3.8**2)):
         super().__init__()
         self.a = a
@@ -141,3 +165,23 @@ class PriorLoss(nn.Module):
         background = self.background.unsqueeze(0).repeat(x.size(0), 1, 1).to(x.device)  # Ensure background is on the same device as x
         masked_x = x * mask_matrix.float()  # Apply mask
         return self.loss_fn(masked_x, background) # Compute and return the loss
+
+class old_HarmonicPrior:
+    def __init__(self, N = 256, a =3/(3.8**2)):
+        J = torch.zeros(N, N)
+        for i, j in zip(np.arange(N-1), np.arange(1, N)):
+            J[i,i] += a
+            J[j,j] += a
+            J[i,j] = J[j,i] = -a
+        D, P = torch.linalg.eigh(J)
+        D_inv = 1/D
+        D_inv[0] = 0
+        self.P, self.D_inv = P, D_inv
+        self.N = N
+
+    def to(self, device):
+        self.P = self.P.to(device)
+        self.D_inv = self.D_inv.to(device)
+        
+    def sample(self, batch_dims=()):
+        return self.P @ (torch.sqrt(self.D_inv)[:,None] * torch.randn(*batch_dims, self.N, 3, device=self.P.device))

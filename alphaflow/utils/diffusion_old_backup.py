@@ -342,3 +342,38 @@ def sample_prior(residue_index, device='cpu'):
     newdists = cbins[newbindists] * sigmas
     return newdists.float()
 '''
+
+'''
+    class PriorLoss(nn.Module):
+    def __init__(self, N, a =3/(3.8**2)):
+        super().__init__()
+        self.a = a
+        self.loss_fn=nn.MSELoss(reduction='sum')
+
+    def fixed_background(self):
+        N = self.N
+        J = torch.zeros(256, 256)
+        for i, j in zip(np.arange(N-1), np.arange(1, N)):
+            #J[i,i] += self.a
+            #J[j,j] += self.a
+            J[i,j] = J[j,i] = - self.a
+        return J
+    # I should remove the diag_mask
+    def mask(self):
+        diag_mask = torch.eye(self.N, dtype=torch.float32)
+        diag_mask = torch.nn.functional.pad(diag_mask, (0, 0, 0, diag_mask.size(0) - self.N))
+        superdiagonal_mask = torch.roll(diag_mask, shifts=1, dims=1)
+        superdiagonal_mask[:, 0] = 0
+        subdiagonal_mask = torch.roll(diag_mask, shifts=-1, dims=1)
+        subdiagonal_mask[:, -1] = 0
+        return superdiagonal_mask+subdiagonal_mask
+    
+    def forward(self, x, N):
+        self.N = N
+        mask = self.mask()
+        mask_matrix = mask.to(x.device)  # Ensure mask is on the same device as x
+        background = self.fixed_background()
+        background = background.unsqueeze(0).repeat(x.size(0), 1, 1).to(x.device)  # Ensure background is on the same device as x
+        masked_x = x * mask_matrix.float()  # Apply mask
+        return self.loss_fn(masked_x, background) # Compute and return the loss
+'''

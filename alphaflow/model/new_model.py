@@ -7,7 +7,7 @@ from .esmfold import ESMFold
 from .alphafold import AlphaFold
 
 from alphaflow.utils.loss import AlphaFoldLoss
-from alphaflow.utils.diffusion import HarmonicPrior, rmsdalign, PriorLoss
+from alphaflow.utils.diffusion import HarmonicPrior, rmsdalign, PriorLoss, old_HarmonicPrior
 from alphaflow.utils import protein
 
 from openfold.utils.loss import lddt_ca
@@ -78,6 +78,7 @@ class AlphaSAXS(pl.LightningModule):
 
     def _add_noise(self, batch):
         
+        N = batch['aatype'].shape[1]
         device = batch['aatype'].device
         batch_dims = batch['seq_length'].shape
         
@@ -86,15 +87,16 @@ class AlphaSAXS(pl.LightningModule):
         noisy , raw_noise= self.saxs_model(batch['saxs'])
         #noisy = noisy.to(device)
         #raw_noise = raw_noise.to(device)
-        
-        noisy = rmsdalign(batch['pseudo_beta'], noisy, weights=batch['pseudo_beta_mask']).detach()
+        noisy = noisy[:,:N,:].to(device)
+        #noisy = rmsdalign(batch['pseudo_beta'], noisy, weights=batch['pseudo_beta_mask']).detach()
 
-        #try:
-        #    noisy = rmsdalign(batch['pseudo_beta'], noisy, weights=batch['pseudo_beta_mask']).detach() # ?!?!
-        #except:
-        #    logger.warning('SVD failed to converge!')
-        #    batch['t'] = torch.ones(batch_dims, device=device)
-        #    return
+        try:
+            noisy = rmsdalign(batch['pseudo_beta'], noisy, weights=batch['pseudo_beta_mask']).detach() # ?!?!
+        except:
+            raise ValueError('SVD failed to converge!')
+            #logger.warning('SVD failed to converge!')
+            #batch['t'] = torch.ones(batch_dims, device=device)
+            return
         
         t = torch.rand(batch_dims, device=device)
         noisy_beta = (1 - t[:,None,None]) * batch['pseudo_beta'] + t[:,None,None] * noisy
@@ -330,12 +332,17 @@ class AlphaSAXS(pl.LightningModule):
                 if p.grad is None:
                     print(name)
 
-    def inference(self, batch, as_protein=False, no_diffusion=False, self_cond=True, noisy_first=False, schedule=None):
+    def inference(self, batch, as_protein=False, no_diffusion=False, self_cond=False, noisy_first=False, schedule=None):
         
         N = batch['aatype'].shape[1]
         device = batch['aatype'].device
-        noisy = self.saxs_model(batch['saxs'])
-        noisy = noisy.to(device)
+        self.saxs_model = self.saxs_model.to(device)
+        noisy, _ = self.saxs_model(batch['saxs'])
+        noisy = noisy[:,:N,:].to(device)
+        #prior = old_HarmonicPrior(N)
+        #prior.to(device)
+        #noisy = prior.sample()
+
         
         if noisy_first:
             batch['noised_pseudo_beta_dists'] = torch.sum((noisy.unsqueeze(-2) - noisy.unsqueeze(-3)) ** 2, dim=-1)**0.5

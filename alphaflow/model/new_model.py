@@ -54,7 +54,10 @@ class AlphaSAXS(pl.LightningModule):
         super().__init__()
         self.save_hyperparameters()
         self.cfg = config
+
+        # SAXS Model is defined here.
         self.saxs_model = HarmonicPrior(input_shape=512, hidden_features=64, output_dim = config.data.train.crop_size)
+        
         self.model = AlphaFold(config,
                 extra_input=args and 'extra_input' in args.__dict__ and args.extra_input)
         if training:
@@ -77,13 +80,13 @@ class AlphaSAXS(pl.LightningModule):
             param.requires_grad = False
 
     def _add_noise(self, batch):
-        
+        '''
+        This function uses SAXS to add the noise for the diffusion process.
+        '''
         N = batch['aatype'].shape[1]
         device = batch['aatype'].device
         batch_dims = batch['seq_length'].shape
         
-        # Just change here is OK
-        # How to change the to device
         noisy , raw_noise= self.saxs_model(batch['saxs'])
         #noisy = noisy.to(device)
         #raw_noise = raw_noise.to(device)
@@ -125,6 +128,11 @@ class AlphaSAXS(pl.LightningModule):
         # like line 159 self._add_noise model change batch.
         #if torch.rand(1, generator=self.generator).item() < self.args.noise_prob:
         #start_time_noise = time.time()
+
+        ###
+        ### THE NOISE IS ADDED HERE
+        ###
+
         batch, noisy = self._add_noise(batch)
         #end_time_noise = time.time()
 
@@ -140,19 +148,16 @@ class AlphaSAXS(pl.LightningModule):
         
         outputs = None
         #if torch.rand(1, generator=self.generator).item() < self.args.self_cond_prob:  
-        #start_time_alphafold = time.time()
         outputs = self.model(batch, prev_outputs=outputs)
-        #end_time_alphafold = time.time()
 
-        #start_time_loss = time.time()
         loss, loss_breakdown = self.loss(outputs, batch, _return_breakdown=True)
-        #print(loss)
-        #print(self.saxs_loss(noisy))
+
+        # SAXS LOSS IS ADDED HERE
+
         saxs_loss = self.saxs_loss(noisy)
         loss += saxs_loss
         loss_breakdown['saxs_loss'] = saxs_loss
 
-        #end_time_loss = time.time()
 
         with torch.no_grad():
             metrics = self._compute_validation_metrics(batch, outputs, superimposition_metrics=False)
@@ -342,7 +347,6 @@ class AlphaSAXS(pl.LightningModule):
         #prior = old_HarmonicPrior(N)
         #prior.to(device)
         #noisy = prior.sample()
-
         
         if noisy_first:
             batch['noised_pseudo_beta_dists'] = torch.sum((noisy.unsqueeze(-2) - noisy.unsqueeze(-3)) ** 2, dim=-1)**0.5

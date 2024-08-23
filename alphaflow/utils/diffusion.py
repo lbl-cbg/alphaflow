@@ -106,6 +106,7 @@ class HarmonicPrior(nn.Module):
     def forward(self, x):
         start_time=time.time()
         pre_contact_map=self.pre_contact_map(x)
+        # A*AT whether all positive value 
         contact_map_herm=pre_contact_map + torch.transpose(pre_contact_map,1,2)
         contact_map_energy = self.energy_reshape(contact_map_herm)
         step1_time=time.time()
@@ -127,7 +128,7 @@ class HarmonicPrior(nn.Module):
         #print('step 5:', step5_time-step4_time)
         #print(return_value.shape)
         #print(torch.sum(contact_map_energy,dim=(2,1)))
-        return return_value,contact_map_energy
+        return return_value, contact_map_energy
     
 class PriorLoss(nn.Module):
     '''

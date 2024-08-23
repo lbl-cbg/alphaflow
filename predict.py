@@ -102,13 +102,23 @@ def main():
 
 
     for i, item in enumerate(valset):
+        for k in item.keys():
+            if not torch.allclose(item[k],valset[i][k]):
+                print("Different {} from the very start {}".format(k,i))
+        if not torch.allclose(item['msa_feat'],valset[i]['msa_feat']):
+            print("Different MSA from the very start {}".format(i))
         if args.pdb_id and item['name'] not in args.pdb_id:
             continue
         if args.no_overwrite and os.path.exists(f'{args.outpdb}/{item["name"]}.pdb'):
             continue
         result = []
+        if not torch.allclose(item['msa_feat'],valset[i]['msa_feat']):
+            print("Different MSA from the start") 
         for j in tqdm.trange(args.samples):
+            if not torch.allclose(item['msa_feat'],valset[i]['msa_feat']):
+                print("Different MSA at the {} itteration".format(j)) 
             if args.subsample or args.resample:
+                # Get item function                
                 item = valset[i] # resample MSA
             start = time.time()
             batch = collate_fn([item])

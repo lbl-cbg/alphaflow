@@ -56,6 +56,7 @@ class AlphaSAXS(pl.LightningModule):
         self.cfg = config
 
         # SAXS Model is defined here.
+        # Make the hidden_features a hyperparameter.
         self.saxs_model = HarmonicPrior(input_shape=512, hidden_features=64, output_dim = config.data.train.crop_size)
         
         self.model = AlphaFold(config,
@@ -90,20 +91,22 @@ class AlphaSAXS(pl.LightningModule):
         noisy , raw_noise= self.saxs_model(batch['saxs'])
         #noisy = noisy.to(device)
         #raw_noise = raw_noise.to(device)
-        noisy = noisy[:,:N,:].to(device)
+        noisy = noisy.to(device)
         #noisy = rmsdalign(batch['pseudo_beta'], noisy, weights=batch['pseudo_beta_mask']).detach()
 
         try:
+            # R3 to SE3
             noisy = rmsdalign(batch['pseudo_beta'], noisy, weights=batch['pseudo_beta_mask']).detach() # ?!?!
         except:
             raise ValueError('SVD failed to converge!')
             #logger.warning('SVD failed to converge!')
             #batch['t'] = torch.ones(batch_dims, device=device)
-            return
+            #return
         
+        # Randomly sample a time embedding is probably not a good idea.
         t = torch.rand(batch_dims, device=device)
         noisy_beta = (1 - t[:,None,None]) * batch['pseudo_beta'] + t[:,None,None] * noisy
-        
+    
         pseudo_beta_dists = torch.sum((noisy_beta.unsqueeze(-2) - noisy_beta.unsqueeze(-3)) ** 2, dim=-1)**0.5
         
         batch_copy = {**batch}
@@ -338,12 +341,15 @@ class AlphaSAXS(pl.LightningModule):
                     print(name)
 
     def inference(self, batch, as_protein=False, no_diffusion=False, self_cond=False, noisy_first=False, schedule=None):
-        
+        # How alphafold merge every thing together.
+        # 256 or shorter.
         N = batch['aatype'].shape[1]
         device = batch['aatype'].device
         self.saxs_model = self.saxs_model.to(device)
         noisy, _ = self.saxs_model(batch['saxs'])
         noisy = noisy[:,:N,:].to(device)
+        
+        #noisy = noisy[:,:N,:].to(device)
         #prior = old_HarmonicPrior(N)
         #prior.to(device)
         #noisy = prior.sample()

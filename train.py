@@ -119,9 +119,11 @@ def main():
         gradient_clip_val=args.grad_clip,
         callbacks=[ModelCheckpoint(
             dirpath=os.environ["MODEL_DIR"], 
-            save_top_k=-1,
+            save_top_k=1,
             every_n_train_steps=100,
-        )],
+        ), ModelCheckpoint(dirpath=os.environ["MODEL_DIR"], 
+                                save_top_k=1,
+                                every_n_epochs=1),],
         accumulate_grad_batches=args.accumulate_grad,
         check_val_every_n_epoch=args.val_freq,
         logger=False, 
